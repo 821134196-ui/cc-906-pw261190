@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>递归不动点引擎实验室</title>
+  <meta name="description" content="多递归 Datalog 风格不动点引擎：半朴素增量传播、Δ⋈Δ、朴素对照、内存限额与分段复核。" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Fixed-point · Semi-naive · Memory tradeoff</p>
+      <h1>递归不动点引擎实验室</h1>
+      <p class="subtitle">
+        用文本规则和本地表描述有限关系程序。含环图只传播每轮新增元组；页面会并行对照朴素全量执行、
+        全量去重索引与分段复核，并检查依赖两个递归关系时的 <span class="inline-code">Δ⋈Δ</span> 推导。
+      </p>
+    </div>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="切换深浅色主题">🌓 切换主题</button>
+  </header>
+
+  <main class="layout">
+    <section class="panel editor-panel" aria-label="规则输入">
+      <h2 class="panel-title">输入程序 <span class="hint">规则 + 本地表</span></h2>
+
+      <div class="control-row">
+        <label class="field" style="flex:1; min-width: 210px;">
+          替换样例
+          <select id="sampleSelect" aria-label="选择内置样例"></select>
+        </label>
+        <button id="loadSampleBtn" class="secondary-btn" type="button" style="align-self:end;">替换编辑器</button>
+      </div>
+      <p id="sampleDescription" class="sample-description"></p>
+
+      <label class="field" for="codeEditor">文本规则 / 本地表</label>
+      <textarea id="codeEditor" class="code-editor" spellcheck="false" aria-label="规则和本地表编辑器"></textarea>
+
+      <div class="control-row" style="margin-top:.8rem;">
+        <label class="field quota-field" for="memoryLimit">
+          内存限额 (MiB)
+          <input id="memoryLimit" type="number" min="0" step="0.01" inputmode="decimal" />
+        </label>
+        <div style="flex:1; min-width: 210px;">
+          <span class="field" style="margin-bottom:.25rem;">快捷限额</span>
+          <div class="quota-presets" role="group" aria-label="快捷内存限额">
+            <button class="ghost-btn preset-btn" type="button" data-quota="0.02">0.02</button>
+            <button class="ghost-btn preset-btn" type="button" data-quota="0.25">0.25</button>
+            <button class="ghost-btn preset-btn" type="button" data-quota="0.75">0.75 对比区间</button>
+            <button class="ghost-btn preset-btn" type="button" data-quota="1">1</button>
+            <button class="ghost-btn preset-btn" type="button" data-quota="2">2</button>
+            <button class="ghost-btn preset-btn" type="button" data-quota="0">不限</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="control-row">
+        <button id="runBtn" class="primary-btn" type="button">运行并对照 <span class="kbd">Ctrl/⌘ + Enter</span></button>
+        <button id="resetSampleBtn" class="ghost-btn" type="button">恢复当前样例</button>
+      </div>
+
+      <div id="parseError" class="error-box" role="alert" hidden></div>
+
+      <details class="help-details">
+        <summary>语法、终止条件与内存模式说明</summary>
+        <p><b>本地表：</b><span class="inline-code">table edge(s,d) = {(1,2),(2,3)}.</span>；也可直接写事实 <span class="inline-code">edge(1,2).</span>。</p>
+        <p><b>规则：</b><span class="inline-code">path(X,Z) :- edge(X,Y), path(Y,Z).</span>。变量以大写字母或 <span class="inline-code">_</span> 开头；小写标识符是常量。</p>
+        <p><b>增量传播：</b>第 n 轮把关系拆成 <span class="inline-code">old</span> 与上一轮 <span class="inline-code">Δ</span>。若规则有两个递归原子，引擎展开
+          <span class="inline-code">ΔR⋈Qold</span>、<span class="inline-code">Rold⋈ΔQ</span>、<span class="inline-code">ΔR⋈ΔQ</span>，因此不会漏掉同轮两侧新增的合取。</p>
+        <p><b>终止条件：</b>当一轮产生的新元组集合为空，即 <span class="inline-code">T(I)=I</span> 时停止。无函数正向 Datalog 的常量域有限，单调算子每轮至少增加一个唯一元组，所以含环关系图也会终止。</p>
+        <p><b>内存：</b>限额按引擎显式逻辑占用估算（元组、Set/Map 槽位、候选批和临时分段索引），不是浏览器 RSS。全量索引常驻所有键；分段复核只保留固定容量段，临时建立段索引或退化为逐键比较，用额外扫描换取更低常驻内存。</p>
+      </details>
+    </section>
+
+    <section class="results" aria-live="polite">
+      <div id="summaryCards" class="summary-grid"></div>
+      <div id="bannerSlot"></div>
+
+      <section class="panel section" aria-labelledby="memoryTitle">
+        <h2 id="memoryTitle">内存限额与去重策略影响</h2>
+        <p class="section-description">
+          三种执行使用同一份解析结果和同一个限额。全量索引与分段复核均为半朴素增量传播；朴素行作为最终集合预言机。
+        </p>
+        <div id="memoryContent"></div>
+      </section>
+
+      <section class="panel section" aria-labelledby="deltaTitle">
+        <h2 id="deltaTitle">双递归同轮新增检查</h2>
+        <p class="section-description">
+          专门统计包含两个及以上 <span class="inline-code">Δ</span> 来源的展开项，并额外运行一个故意只保留单侧 Δ 的错误版本。
+        </p>
+        <div id="deltaContent"></div>
+      </section>
+
+      <section class="panel section" aria-labelledby="roundsTitle">
+        <h2 id="roundsTitle">逐轮中间量对照</h2>
+        <p class="section-description">点击每一轮可查看本轮新增元组、差分标签和规则项候选量。</p>
+        <div id="roundsContent"></div>
+      </section>
+
+      <section class="panel section" aria-labelledby="finalTitle">
+        <h2 id="finalTitle">最终关系集合</h2>
+        <p class="section-description">在谓词之间切换；集合比较忽略推导顺序。超出渲染上限时可展开全部。</p>
+        <div id="finalContent"></div>
+      </section>
+    </section>
+  </main>
+
+  <p class="footer-note">纯静态、无外部依赖；可直接打开 index.html，也可运行 <span class="inline-code">npm start</span> 后访问本地服务器。</p>
+
+  <script src="./engine.js"></script>
+  <script src="./samples.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

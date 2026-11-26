@@ -1,0 +1,14 @@
+{
+  "name": "recursive-fixpoint-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small Datalog-style fixed-point engine with semi-naive propagation and memory/dedup comparison.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check engine.js && node --check app.js && node --check samples.js",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
